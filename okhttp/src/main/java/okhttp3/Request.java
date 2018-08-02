@@ -16,10 +16,7 @@
 package okhttp3;
 
 import java.net.URL;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import javax.annotation.Nullable;
 import okhttp3.internal.Util;
 import okhttp3.internal.http.HttpMethod;
@@ -33,9 +30,8 @@ public final class Request {
   final String method;
   final Headers headers;
   final @Nullable RequestBody body;
+  final Object tag;
   final String sni;
-  final Map<Class<?>, Object> tags;
-
 
   private volatile CacheControl cacheControl; // Lazily initialized.
 
@@ -45,7 +41,7 @@ public final class Request {
     this.headers = builder.headers.build();
     this.body = builder.body;
     this.sni = builder.sni;
-    this.tags = Util.immutableMap(builder.tags);
+    this.tag = builder.tag != null ? builder.tag : this;
   }
 
   public HttpUrl url() {
@@ -72,24 +68,8 @@ public final class Request {
     return body;
   }
 
-  /**
-   * Returns the tag attached with {@code Object.class} as a key, or null if no tag is attached with
-   * that key.
-   *
-   * <p>Prior to OkHttp 3.11, this method never returned null if no tag was attached. Instead it
-   * returned either this request, or the request upon which this request was derived with {@link
-   * #newBuilder()}.
-   */
-  public @Nullable Object tag() {
-    return tag(Object.class);
-  }
-
-  /**
-   * Returns the tag attached with {@code type} as a key, or null if no tag is attached with that
-   * key.
-   */
-  public @Nullable <T> T tag(Class<? extends T> type) {
-    return type.cast(tags.get(type));
+  public Object tag() {
+    return tag;
   }
 
   public Builder newBuilder() {
@@ -114,8 +94,8 @@ public final class Request {
         + method
         + ", url="
         + url
-        + ", tags="
-        + tags
+        + ", tag="
+        + (tag != this ? tag : null)
         + '}';
   }
   
@@ -129,9 +109,7 @@ public final class Request {
     String method;
     Headers.Builder headers;
     RequestBody body;
-
-    /** A mutable map of tags, or an immutable empty map if we don't have any. */
-    Map<Class<?>, Object> tags = Collections.emptyMap();
+    Object tag;
 
     public Builder() {
       this.method = "GET";
@@ -142,9 +120,7 @@ public final class Request {
       this.url = request.url;
       this.method = request.method;
       this.body = request.body;
-      this.tags = request.tags.isEmpty()
-          ? Collections.<Class<?>, Object>emptyMap()
-          : new LinkedHashMap<>(request.tags);
+      this.tag = request.tag;
       this.headers = request.headers.newBuilder();
     }
 
@@ -170,7 +146,9 @@ public final class Request {
         url = "https:" + url.substring(4);
       }
 
-      return url(HttpUrl.get(url));
+      HttpUrl parsed = HttpUrl.parse(url);
+      if (parsed == null) throw new IllegalArgumentException("unexpected url: " + url);
+      return url(parsed);
     }
 
     /**
@@ -181,7 +159,9 @@ public final class Request {
      */
     public Builder url(URL url) {
       if (url == null) throw new NullPointerException("url == null");
-      return url(HttpUrl.get(url.toString()));
+      HttpUrl parsed = HttpUrl.get(url);
+      if (parsed == null) throw new IllegalArgumentException("unexpected url: " + url);
+      return url(parsed);
     }
 
     /**
@@ -205,7 +185,6 @@ public final class Request {
       return this;
     }
 
-    /** Removes all headers named {@code name} on this builder. */
     public Builder removeHeader(String name) {
       headers.removeAll(name);
       return this;
@@ -270,29 +249,12 @@ public final class Request {
       return this;
     }
 
-    /** Attaches {@code tag} to the request using {@code Object.class} as a key. */
-    public Builder tag(@Nullable Object tag) {
-      return tag(Object.class, tag);
-    }
-
     /**
-     * Attaches {@code tag} to the request using {@code type} as a key. Tags can be read from a
-     * request using {@link Request#tag}. Use null to remove any existing tag assigned for {@code
-     * type}.
-     *
-     * <p>Use this API to attach timing, debugging, or other application data to a request so that
-     * you may read it in interceptors, event listeners, or callbacks.
+     * Attaches {@code tag} to the request. It can be used later to cancel the request. If the tag
+     * is unspecified or null, the request is canceled by using the request itself as the tag.
      */
-    public <T> Builder tag(Class<? super T> type, @Nullable T tag) {
-      if (type == null) throw new NullPointerException("type == null");
-
-      if (tag == null) {
-        tags.remove(type);
-      } else {
-        if (tags.isEmpty()) tags = new LinkedHashMap<>();
-        tags.put(type, type.cast(tag));
-      }
-
+    public Builder tag(Object tag) {
+      this.tag = tag;
       return this;
     }
 

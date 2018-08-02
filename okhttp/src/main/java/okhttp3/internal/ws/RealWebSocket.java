@@ -18,7 +18,6 @@ package okhttp3.internal.ws;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.ProtocolException;
-import java.net.SocketTimeoutException;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.List;
@@ -73,7 +72,6 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
 
   final WebSocketListener listener;
   private final Random random;
-  private final long pingIntervalMillis;
   private final String key;
 
   /** Non-null for client web sockets. These can be canceled. */
@@ -127,27 +125,19 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
   /** True if this web socket failed and the listener has been notified. */
   private boolean failed;
 
-  /** Total number of pings sent by this web socket. */
-  private int sentPingCount;
+  /** For testing. */
+  int pingCount;
 
-  /** Total number of pings received by this web socket. */
-  private int receivedPingCount;
+  /** For testing. */
+  int pongCount;
 
-  /** Total number of pongs received by this web socket. */
-  private int receivedPongCount;
-
-  /** True if we have sent a ping that is still awaiting a reply. */
-  private boolean awaitingPong;
-
-  public RealWebSocket(Request request, WebSocketListener listener, Random random,
-      long pingIntervalMillis) {
+  public RealWebSocket(Request request, WebSocketListener listener, Random random) {
     if (!"GET".equals(request.method())) {
       throw new IllegalArgumentException("Request must be GET: " + request.method());
     }
     this.originalRequest = request;
     this.listener = listener;
     this.random = random;
-    this.pingIntervalMillis = pingIntervalMillis;
 
     byte[] nonce = new byte[16];
     random.nextBytes(nonce);
@@ -182,6 +172,7 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
         .eventListener(EventListener.NONE)
         .protocols(ONLY_HTTP1)
         .build();
+    final int pingIntervalMillis = client.pingIntervalMillis();
     final Request request = originalRequest.newBuilder()
         .header("Upgrade", "websocket")
         .header("Connection", "Upgrade")
@@ -208,7 +199,7 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
         try {
           listener.onOpen(RealWebSocket.this, response);
           String name = "OkHttp WebSocket " + request.url().redact();
-          initReaderAndWriter(name, streams);
+          initReaderAndWriter(name, pingIntervalMillis, streams);
           streamAllocation.connection().socket().setSoTimeout(0);
           loopReader();
         } catch (Exception e) {
@@ -249,7 +240,8 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
     }
   }
 
-  public void initReaderAndWriter(String name, Streams streams) throws IOException {
+  public void initReaderAndWriter(
+      String name, long pingIntervalMillis, Streams streams) throws IOException {
     synchronized (this) {
       this.streams = streams;
       this.writer = new WebSocketWriter(streams.client, streams.sink, random);
@@ -306,16 +298,12 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
     executor.awaitTermination(10, TimeUnit.SECONDS);
   }
 
-  synchronized int sentPingCount() {
-    return sentPingCount;
+  synchronized int pingCount() {
+    return pingCount;
   }
 
-  synchronized int receivedPingCount() {
-    return receivedPingCount;
-  }
-
-  synchronized int receivedPongCount() {
-    return receivedPongCount;
+  synchronized int pongCount() {
+    return pongCount;
   }
 
   @Override public void onReadMessage(String text) throws IOException {
@@ -332,13 +320,12 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
 
     pongQueue.add(payload);
     runWriter();
-    receivedPingCount++;
+    pingCount++;
   }
 
   @Override public synchronized void onReadPong(ByteString buffer) {
     // This API doesn't expose pings.
-    receivedPongCount++;
-    awaitingPong = false;
+    pongCount++;
   }
 
   @Override public void onReadClose(int code, String reason) {
@@ -532,20 +519,9 @@ public final class RealWebSocket implements WebSocket, WebSocketReader.FrameCall
 
   void writePingFrame() {
     WebSocketWriter writer;
-    int failedPing;
     synchronized (this) {
       if (failed) return;
       writer = this.writer;
-      failedPing = awaitingPong ? sentPingCount : -1;
-      sentPingCount++;
-      awaitingPong = true;
-    }
-
-    if (failedPing != -1) {
-      failWebSocket(new SocketTimeoutException("sent ping but didn't receive pong within "
-          + pingIntervalMillis + "ms (after " + (failedPing - 1) + " successful ping/pongs)"),
-          null);
-      return;
     }
 
     try {

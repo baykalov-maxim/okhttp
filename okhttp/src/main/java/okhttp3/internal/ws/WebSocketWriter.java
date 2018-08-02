@@ -45,9 +45,9 @@ final class WebSocketWriter {
   final boolean isClient;
   final Random random;
 
+  /** Writes must be guarded by synchronizing on 'this'. */
   final BufferedSink sink;
-  /** The {@link Buffer} of {@link #sink}. Write to this and then flush/emit {@link #sink}. */
-  final Buffer sinkBuffer;
+  /** Access must be guarded by synchronizing on 'this'. */
   boolean writerClosed;
 
   final Buffer buffer = new Buffer();
@@ -55,20 +55,19 @@ final class WebSocketWriter {
 
   boolean activeWriter;
 
-  private final byte[] maskKey;
-  private final Buffer.UnsafeCursor maskCursor;
+  final byte[] maskKey;
+  final byte[] maskBuffer;
 
   WebSocketWriter(boolean isClient, BufferedSink sink, Random random) {
     if (sink == null) throw new NullPointerException("sink == null");
     if (random == null) throw new NullPointerException("random == null");
     this.isClient = isClient;
     this.sink = sink;
-    this.sinkBuffer = sink.buffer();
     this.random = random;
 
     // Masks are only a concern for client writers.
     maskKey = isClient ? new byte[4] : null;
-    maskCursor = isClient ? new Buffer.UnsafeCursor() : null;
+    maskBuffer = isClient ? new byte[8192] : null;
   }
 
   /** Send a ping with the supplied {@code payload}. */
@@ -119,28 +118,22 @@ final class WebSocketWriter {
     }
 
     int b0 = B0_FLAG_FIN | opcode;
-    sinkBuffer.writeByte(b0);
+    sink.writeByte(b0);
 
     int b1 = length;
     if (isClient) {
       b1 |= B1_FLAG_MASK;
-      sinkBuffer.writeByte(b1);
+      sink.writeByte(b1);
 
       random.nextBytes(maskKey);
-      sinkBuffer.write(maskKey);
+      sink.write(maskKey);
 
-      if (length > 0) {
-        long payloadStart = sinkBuffer.size();
-        sinkBuffer.write(payload);
-
-        sinkBuffer.readAndWriteUnsafe(maskCursor);
-        maskCursor.seek(payloadStart);
-        toggleMask(maskCursor, maskKey);
-        maskCursor.close();
-      }
+      byte[] bytes = payload.toByteArray();
+      toggleMask(bytes, bytes.length, maskKey, 0);
+      sink.write(bytes);
     } else {
-      sinkBuffer.writeByte(b1);
-      sinkBuffer.write(payload);
+      sink.writeByte(b1);
+      sink.write(payload);
     }
 
     sink.flush();
@@ -173,7 +166,7 @@ final class WebSocketWriter {
     if (isFinal) {
       b0 |= B0_FLAG_FIN;
     }
-    sinkBuffer.writeByte(b0);
+    sink.writeByte(b0);
 
     int b1 = 0;
     if (isClient) {
@@ -181,32 +174,31 @@ final class WebSocketWriter {
     }
     if (byteCount <= PAYLOAD_BYTE_MAX) {
       b1 |= (int) byteCount;
-      sinkBuffer.writeByte(b1);
+      sink.writeByte(b1);
     } else if (byteCount <= PAYLOAD_SHORT_MAX) {
       b1 |= PAYLOAD_SHORT;
-      sinkBuffer.writeByte(b1);
-      sinkBuffer.writeShort((int) byteCount);
+      sink.writeByte(b1);
+      sink.writeShort((int) byteCount);
     } else {
       b1 |= PAYLOAD_LONG;
-      sinkBuffer.writeByte(b1);
-      sinkBuffer.writeLong(byteCount);
+      sink.writeByte(b1);
+      sink.writeLong(byteCount);
     }
 
     if (isClient) {
       random.nextBytes(maskKey);
-      sinkBuffer.write(maskKey);
+      sink.write(maskKey);
 
-      if (byteCount > 0) {
-        long bufferStart = sinkBuffer.size();
-        sinkBuffer.write(buffer, byteCount);
-
-        sinkBuffer.readAndWriteUnsafe(maskCursor);
-        maskCursor.seek(bufferStart);
-        toggleMask(maskCursor, maskKey);
-        maskCursor.close();
+      for (long written = 0; written < byteCount; ) {
+        int toRead = (int) Math.min(byteCount, maskBuffer.length);
+        int read = buffer.read(maskBuffer, 0, toRead);
+        if (read == -1) throw new AssertionError();
+        toggleMask(maskBuffer, read, maskKey, written);
+        sink.write(maskBuffer, 0, read);
+        written += read;
       }
     } else {
-      sinkBuffer.write(buffer, byteCount);
+      sink.write(buffer, byteCount);
     }
 
     sink.emit();

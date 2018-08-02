@@ -95,25 +95,10 @@ public final class CallServerInterceptor implements Interceptor {
         .receivedResponseAtMillis(System.currentTimeMillis())
         .build();
 
-    int code = response.code();
-    if (code == 100) {
-      // server sent a 100-continue even though we did not request one.
-      // try again to read the actual response
-      responseBuilder = httpCodec.readResponseHeaders(false);
-
-      response = responseBuilder
-              .request(request)
-              .handshake(streamAllocation.connection().handshake())
-              .sentRequestAtMillis(sentRequestMillis)
-              .receivedResponseAtMillis(System.currentTimeMillis())
-              .build();
-
-      code = response.code();
-    }
-
     realChain.eventListener()
-            .responseHeadersEnd(realChain.call(), response);
+        .responseHeadersEnd(realChain.call(), response);
 
+    int code = response.code();
     if (forWebSocket && code == 101) {
       // Connection is upgrading, but we need to ensure interceptors see a non-null response body.
       response = response.newBuilder()

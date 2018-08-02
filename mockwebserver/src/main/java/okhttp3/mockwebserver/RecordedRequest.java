@@ -16,11 +16,9 @@
 
 package okhttp3.mockwebserver;
 
-import java.io.IOException;
 import java.net.Socket;
 import java.util.List;
 import javax.net.ssl.SSLSocket;
-import okhttp3.Handshake;
 import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.TlsVersion;
@@ -32,11 +30,11 @@ public final class RecordedRequest {
   private final String method;
   private final String path;
   private final Headers headers;
-  private final Handshake handshake;
   private final List<Integer> chunkSizes;
   private final long bodySize;
   private final Buffer body;
   private final int sequenceNumber;
+  private final TlsVersion tlsVersion;
   private final HttpUrl requestUrl;
 
   public RecordedRequest(String requestLine, Headers headers, List<Integer> chunkSizes,
@@ -47,15 +45,9 @@ public final class RecordedRequest {
     this.bodySize = bodySize;
     this.body = body;
     this.sequenceNumber = sequenceNumber;
-    if (socket instanceof SSLSocket) {
-      try {
-        this.handshake = Handshake.get(((SSLSocket) socket).getSession());
-      } catch (IOException e) {
-        throw new IllegalArgumentException(e);
-      }
-    } else {
-      this.handshake = null;
-    }
+    this.tlsVersion = socket instanceof SSLSocket
+        ? TlsVersion.forJavaName(((SSLSocket) socket).getSession().getProtocol())
+        : null;
 
     if (requestLine != null) {
       int methodEnd = requestLine.indexOf(' ');
@@ -136,15 +128,7 @@ public final class RecordedRequest {
 
   /** Returns the connection's TLS version or null if the connection doesn't use SSL. */
   public TlsVersion getTlsVersion() {
-    return handshake != null ? handshake.tlsVersion() : null;
-  }
-
-  /**
-   * Returns the TLS handshake of the connection that carried this request, or null if the request
-   * was received without TLS.
-   */
-  public Handshake getHandshake() {
-    return handshake;
+    return tlsVersion;
   }
 
   @Override public String toString() {

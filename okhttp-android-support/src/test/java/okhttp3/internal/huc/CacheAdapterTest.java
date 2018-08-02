@@ -35,15 +35,14 @@ import okhttp3.OkUrlFactory;
 import okhttp3.RecordingHostnameVerifier;
 import okhttp3.internal.Internal;
 import okhttp3.internal.cache.InternalCache;
+import okhttp3.internal.tls.SslClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.tls.HandshakeCertificates;
 import okio.Buffer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import static okhttp3.tls.internal.TlsUtil.localhost;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -59,7 +58,7 @@ import static org.junit.Assert.assertTrue;
  * </ul>
  */
 public class CacheAdapterTest {
-  private HandshakeCertificates handshakeCertificates = localhost();
+  private SslClient sslClient = SslClient.localhost();
   private HostnameVerifier hostnameVerifier = new RecordingHostnameVerifier();
   private MockWebServer server;
   private OkHttpClient client;
@@ -124,8 +123,7 @@ public class CacheAdapterTest {
     };
     setInternalCache(new CacheAdapter(responseCache));
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(hostnameVerifier)
         .build();
 
@@ -255,8 +253,7 @@ public class CacheAdapterTest {
     };
     setInternalCache(new CacheAdapter(responseCache));
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(hostnameVerifier)
         .build();
 
@@ -284,7 +281,7 @@ public class CacheAdapterTest {
   }
 
   private URL configureHttpsServer(MockResponse mockResponse) throws Exception {
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false /* tunnelProxy */);
+    server.useHttps(sslClient.socketFactory, false /* tunnelProxy */);
     server.enqueue(mockResponse);
     server.start();
     return server.url("/").url();
