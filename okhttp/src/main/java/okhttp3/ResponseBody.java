@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 import okhttp3.internal.Util;
 import okio.Buffer;
 import okio.BufferedSource;
-import okio.ByteString;
 
 import static okhttp3.internal.Util.UTF_8;
 
@@ -49,7 +48,7 @@ import static okhttp3.internal.Util.UTF_8;
  *   <li>Response.body().close()</li>
  *   <li>Response.body().source().close()</li>
  *   <li>Response.body().charStream().close()</li>
- *   <li>Response.body().byteStream().close()</li>
+ *   <li>Response.body().byteString().close()</li>
  *   <li>Response.body().bytes()</li>
  *   <li>Response.body().string()</li>
  * </ul>
@@ -209,12 +208,6 @@ public abstract class ResponseBody implements Closeable {
   public static ResponseBody create(final @Nullable MediaType contentType, byte[] content) {
     Buffer buffer = new Buffer().write(content);
     return create(contentType, content.length, buffer);
-  }
-
-  /** Returns a new response body that transmits {@code content}. */
-  public static ResponseBody create(@Nullable MediaType contentType, ByteString content) {
-    Buffer buffer = new Buffer().write(content);
-    return create(contentType, content.size(), buffer);
   }
 
   /** Returns a new response body that transmits {@code content}. */

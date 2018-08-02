@@ -20,7 +20,7 @@ import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import okhttp3.HttpUrl;
-import okhttp3.tls.HandshakeCertificates;
+import okhttp3.internal.tls.SslClient;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -30,8 +30,6 @@ import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.conn.PoolingClientConnectionManager;
-
-import static okhttp3.tls.internal.TlsUtil.localhost;
 
 /** Benchmark Apache HTTP client. */
 class ApacheHttpClient extends SynchronousHttpClient {
@@ -43,9 +41,9 @@ class ApacheHttpClient extends SynchronousHttpClient {
     super.prepare(benchmark);
     ClientConnectionManager connectionManager = new PoolingClientConnectionManager();
     if (benchmark.tls) {
-      HandshakeCertificates handshakeCertificates = localhost();
+      SslClient sslClient = SslClient.localhost();
       connectionManager.getSchemeRegistry().register(
-          new Scheme("https", 443, new SSLSocketFactory(handshakeCertificates.sslContext())));
+          new Scheme("https", 443, new SSLSocketFactory(sslClient.sslContext)));
     }
     client = new DefaultHttpClient(connectionManager);
   }

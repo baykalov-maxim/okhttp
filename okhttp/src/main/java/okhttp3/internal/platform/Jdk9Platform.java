@@ -18,7 +18,6 @@ package okhttp3.internal.platform;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
-import javax.annotation.Nullable;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -57,7 +56,7 @@ final class Jdk9Platform extends Platform {
   }
 
   @Override
-  public @Nullable String getSelectedProtocol(SSLSocket socket) {
+  public String getSelectedProtocol(SSLSocket socket) {
     try {
       String protocol = (String) getProtocolMethod.invoke(socket);
 

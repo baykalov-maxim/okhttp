@@ -29,6 +29,7 @@ import javax.net.ssl.SSLSocketFactory;
 import okhttp3.Address;
 import okhttp3.Call;
 import okhttp3.CertificatePinner;
+import okhttp3.Connection;
 import okhttp3.EventListener;
 import okhttp3.HttpUrl;
 import okhttp3.Interceptor;
@@ -48,7 +49,6 @@ import static java.net.HttpURLConnection.HTTP_MULT_CHOICE;
 import static java.net.HttpURLConnection.HTTP_PROXY_AUTH;
 import static java.net.HttpURLConnection.HTTP_SEE_OTHER;
 import static java.net.HttpURLConnection.HTTP_UNAUTHORIZED;
-import static java.net.HttpURLConnection.HTTP_UNAVAILABLE;
 import static okhttp3.internal.Util.closeQuietly;
 import static okhttp3.internal.http.StatusLine.HTTP_PERM_REDIRECT;
 import static okhttp3.internal.http.StatusLine.HTTP_TEMP_REDIRECT;
@@ -66,7 +66,7 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
 
   private final OkHttpClient client;
   private final boolean forWebSocket;
-  private volatile StreamAllocation streamAllocation;
+  private StreamAllocation streamAllocation;
   private Object callStackTrace;
   private volatile boolean canceled;
 
@@ -108,9 +108,8 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
     Call call = realChain.call();
     EventListener eventListener = realChain.eventListener();
 
-    StreamAllocation streamAllocation = new StreamAllocation(client.connectionPool(),
-        createAddress(request.url()), call, eventListener, callStackTrace);
-    this.streamAllocation = streamAllocation;
+    streamAllocation = new StreamAllocation(client.connectionPool(), createAddress(request.url()),
+        call, eventListener, callStackTrace);
 
     int followUpCount = 0;
     Response priorResponse = null;
@@ -127,15 +126,15 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
         releaseConnection = false;
       } catch (RouteException e) {
         // The attempt to connect via a route failed. The request will not have been sent.
-        if (!recover(e.getLastConnectException(), streamAllocation, false, request)) {
-          throw e.getFirstConnectException();
+        if (!recover(e.getLastConnectException(), false, request)) {
+          throw e.getLastConnectException();
         }
         releaseConnection = false;
         continue;
       } catch (IOException e) {
         // An attempt to communicate with a server failed. The request may have been sent.
         boolean requestSendStarted = !(e instanceof ConnectionShutdownException);
-        if (!recover(e, streamAllocation, requestSendStarted, request)) throw e;
+        if (!recover(e, requestSendStarted, request)) throw e;
         releaseConnection = false;
         continue;
       } finally {
@@ -155,13 +154,7 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
             .build();
       }
 
-      Request followUp;
-      try {
-        followUp = followUpRequest(response, streamAllocation.route());
-      } catch (IOException e) {
-        streamAllocation.release();
-        throw e;
-      }
+      Request followUp = followUpRequest(response);
 
       if (followUp == null) {
         if (!forWebSocket) {
@@ -186,7 +179,6 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
         streamAllocation.release();
         streamAllocation = new StreamAllocation(client.connectionPool(),
             createAddress(followUp.url()), call, eventListener, callStackTrace);
-        this.streamAllocation = streamAllocation;
       } else if (streamAllocation.codec() != null) {
         throw new IllegalStateException("Closing the body of " + response
             + " didn't close its backing stream. Bad interceptor?");
@@ -218,8 +210,7 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
    * be recovered if the body is buffered or if the failure occurred before the request has been
    * sent.
    */
-  private boolean recover(IOException e, StreamAllocation streamAllocation,
-      boolean requestSendStarted, Request userRequest) {
+  private boolean recover(IOException e, boolean requestSendStarted, Request userRequest) {
     streamAllocation.streamFailed(e);
 
     // The application layer has forbidden retries.
@@ -275,8 +266,12 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
    * either add authentication headers, follow redirects or handle a client request timeout. If a
    * follow-up is either unnecessary or not applicable, this returns null.
    */
-  private Request followUpRequest(Response userResponse, Route route) throws IOException {
+  private Request followUpRequest(Response userResponse) throws IOException {
     if (userResponse == null) throw new IllegalStateException();
+    Connection connection = streamAllocation.connection();
+    Route route = connection != null
+        ? connection.route()
+        : null;
     int responseCode = userResponse.code();
 
     final String method = userResponse.request().method();
@@ -364,45 +359,11 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
           return null;
         }
 
-        if (retryAfter(userResponse, 0) > 0) {
-          return null;
-        }
-
         return userResponse.request();
-
-      case HTTP_UNAVAILABLE:
-        if (userResponse.priorResponse() != null
-            && userResponse.priorResponse().code() == HTTP_UNAVAILABLE) {
-          // We attempted to retry and got another timeout. Give up.
-          return null;
-        }
-
-        if (retryAfter(userResponse, Integer.MAX_VALUE) == 0) {
-          // specifically received an instruction to retry without delay
-          return userResponse.request();
-        }
-
-        return null;
 
       default:
         return null;
     }
-  }
-
-  private int retryAfter(Response userResponse, int defaultDelay) {
-    String header = userResponse.header("Retry-After");
-
-    if (header == null) {
-      return defaultDelay;
-    }
-
-    // https://tools.ietf.org/html/rfc7231#section-7.1.3
-    // currently ignores a HTTP-date, and assumes any non int 0 is a delay
-    if (header.matches("\\d+")) {
-      return Integer.valueOf(header);
-    }
-
-    return Integer.MAX_VALUE;
   }
 
   /**

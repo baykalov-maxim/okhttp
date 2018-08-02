@@ -17,9 +17,6 @@ package okhttp3.testing;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import org.junit.internal.Throwables;
 import org.junit.runner.Description;
 import org.junit.runner.Result;
 import org.junit.runner.notification.RunListener;
@@ -33,9 +30,8 @@ public class InstallUncaughtExceptionHandlerListener extends RunListener {
 
   private Thread.UncaughtExceptionHandler oldDefaultUncaughtExceptionHandler;
   private Description lastTestStarted;
-  private final Map<Throwable, String> exceptions = new LinkedHashMap<>();
 
-  @Override public void testRunStarted(Description description) {
+  @Override public void testRunStarted(Description description) throws Exception {
     System.err.println("Installing aggressive uncaught exception handler");
     oldDefaultUncaughtExceptionHandler = Thread.getDefaultUncaughtExceptionHandler();
     Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
@@ -52,26 +48,17 @@ public class InstallUncaughtExceptionHandlerListener extends RunListener {
           errorText.append("\n");
         }
         System.err.print(errorText.toString());
-
-        synchronized (exceptions) {
-          exceptions.put(throwable, lastTestStarted.getDisplayName());
-        }
+        System.exit(-1);
       }
     });
   }
 
-  @Override public void testStarted(Description description) {
+  @Override public void testStarted(Description description) throws Exception {
     lastTestStarted = description;
   }
 
   @Override public void testRunFinished(Result result) throws Exception {
     Thread.setDefaultUncaughtExceptionHandler(oldDefaultUncaughtExceptionHandler);
     System.err.println("Uninstalled aggressive uncaught exception handler");
-
-    synchronized (exceptions) {
-      if (!exceptions.isEmpty()) {
-        throw Throwables.rethrowAsException(exceptions.keySet().iterator().next());
-      }
-    }
   }
 }

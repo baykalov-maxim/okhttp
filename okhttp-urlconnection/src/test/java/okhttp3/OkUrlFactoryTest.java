@@ -2,11 +2,8 @@ package okhttp3;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.UnknownHostException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -17,10 +14,9 @@ import javax.net.ssl.HttpsURLConnection;
 import okhttp3.internal.URLFilter;
 import okhttp3.internal.huc.OkHttpURLConnection;
 import okhttp3.internal.io.InMemoryFileSystem;
+import okhttp3.internal.tls.SslClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
-import okhttp3.tls.HandshakeCertificates;
 import okio.BufferedSource;
 import org.junit.After;
 import org.junit.Before;
@@ -28,7 +24,6 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static okhttp3.tls.internal.TlsUtil.localhost;
 import static okio.Okio.buffer;
 import static okio.Okio.source;
 import static org.junit.Assert.assertEquals;
@@ -41,7 +36,7 @@ public class OkUrlFactoryTest {
   private OkUrlFactory factory;
   private Cache cache;
 
-  @Before public void setUp() {
+  @Before public void setUp() throws IOException {
     cache = new Cache(new File("/cache/"), 10 * 1024 * 1024, fileSystem);
     OkHttpClient client = new OkHttpClient.Builder()
         .cache(cache)
@@ -57,7 +52,7 @@ public class OkUrlFactoryTest {
    * Response code 407 should only come from proxy servers. Android's client throws if it is sent by
    * an origin server.
    */
-  @Test public void originServerSends407() {
+  @Test public void originServerSends407() throws Exception {
     server.enqueue(new MockResponse().setResponseCode(407));
 
     HttpURLConnection conn = factory.open(server.url("/").url());
@@ -182,17 +177,16 @@ public class OkUrlFactoryTest {
   }
 
   @Test
-  public void testURLFilterRedirect() {
+  public void testURLFilterRedirect() throws Exception {
     MockWebServer cleartextServer = new MockWebServer();
     cleartextServer.enqueue(new MockResponse()
         .setBody("Blocked!"));
     final URL blockedURL = cleartextServer.url("/").url();
 
-    HandshakeCertificates handshakeCertificates = localhost();
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    SslClient contextBuilder = SslClient.localhost();
+    server.useHttps(contextBuilder.socketFactory, false);
     factory.setClient(factory.client().newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(contextBuilder.socketFactory, contextBuilder.trustManager)
         .followSslRedirects(true)
         .build());
     factory.setUrlFilter(new URLFilter() {
@@ -214,71 +208,6 @@ public class OkUrlFactoryTest {
       httpsConnection.getInputStream();
       fail("Connection was successful");
     } catch (IOException expected) {
-    }
-  }
-
-  @Test public void usesValidHeaderValueForDefaultUserAgent() throws Exception {
-    String userAgent =  "🍩 " + "\u001F" + ('\u001f' + 1) + ('\u007f' - 1)+ '\u007f' + " 🍩";
-    String expected = "? ?" + ('\u001f' + 1) + ('\u007f' - 1) + "? ?";
-
-    System.setProperty("http.agent", userAgent);
-    server.enqueue(new MockResponse().setResponseCode(200));
-    InputStream inputStream = factory.open(server.url("/").url()).getInputStream();
-    long skipped;
-    do {
-      skipped = inputStream.skip(Long.MAX_VALUE);
-    } while (skipped != 0);
-    RecordedRequest recordedRequest = server.takeRequest();
-    assertEquals(expected, recordedRequest.getHeader("User-Agent"));
-  }
-
-  @Test public void usesSimpleDefaultUserAgentWithoutModification() throws Exception {
-    String userAgent = "OkHttp";
-    String expected = "OkHttp";
-
-    System.setProperty("http.agent", userAgent);
-    server.enqueue(new MockResponse().setResponseCode(200));
-    InputStream inputStream = factory.open(server.url("/").url()).getInputStream();
-    long skipped;
-    do {
-      skipped = inputStream.skip(Long.MAX_VALUE);
-    } while (skipped != 0);
-    RecordedRequest recordedRequest = server.takeRequest();
-    assertEquals(expected, recordedRequest.getHeader("User-Agent"));
-  }
-
-  @Test public void handlesBadUnicodeStringsInDefaultUserAgent() throws Exception {
-    String userAgent =  "🔊".substring(0, 1);
-    String expected = "?";
-
-    System.setProperty("http.agent", userAgent);
-    server.enqueue(new MockResponse().setResponseCode(200));
-    InputStream inputStream = factory.open(server.url("/").url()).getInputStream();
-    long skipped;
-    do {
-      skipped = inputStream.skip(Long.MAX_VALUE);
-    } while (skipped != 0);
-    RecordedRequest recordedRequest = server.takeRequest();
-    assertEquals(expected, recordedRequest.getHeader("User-Agent"));
-  }
-
-  @Test public void javaNetUrlMalformedUrl() throws Exception {
-    server.enqueue(new MockResponse());
-    HttpURLConnection connection = factory.open(new URL("http://example.com:-1"));
-    try {
-      connection.getInputStream();
-      fail();
-    } catch (MalformedURLException expected) {
-    }
-  }
-
-  @Test public void javaNetUrlBadHost() throws Exception {
-    server.enqueue(new MockResponse());
-    HttpURLConnection connection = factory.open(new URL("http://hostw ithspace/"));
-    try {
-      connection.getInputStream();
-      fail();
-    } catch (UnknownHostException expected) {
     }
   }
 

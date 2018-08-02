@@ -36,7 +36,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import static okhttp3.TestUtil.defaultClient;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public final class ThreadInterruptTest {
@@ -93,9 +92,6 @@ public final class ThreadInterruptTest {
       }
       fail("Expected thread to be interrupted");
     } catch (InterruptedIOException expected) {
-      // TODO(jwilson): test that we're interrupted once Okio retains interrupted state.
-      //     https://github.com/square/okhttp/issues/3107
-      if (false) assertTrue(Thread.interrupted());
     }
 
     connection.disconnect();
@@ -119,9 +115,6 @@ public final class ThreadInterruptTest {
       }
       fail("Expected thread to be interrupted");
     } catch (InterruptedIOException expected) {
-      // TODO(jwilson): test that we're interrupted once Okio retains interrupted state.
-      //     https://github.com/square/okhttp/issues/3107
-      if (false) assertTrue(Thread.interrupted());
     }
 
     responseBody.close();
@@ -135,7 +128,7 @@ public final class ThreadInterruptTest {
           sleep(delayMillis);
           toInterrupt.interrupt();
         } catch (InterruptedException e) {
-          throw new AssertionError(e);
+          throw new RuntimeException(e);
         }
       }
     };

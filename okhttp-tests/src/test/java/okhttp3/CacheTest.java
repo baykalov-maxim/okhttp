@@ -38,10 +38,10 @@ import javax.net.ssl.SSLSession;
 import okhttp3.internal.Internal;
 import okhttp3.internal.io.InMemoryFileSystem;
 import okhttp3.internal.platform.Platform;
+import okhttp3.internal.tls.SslClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import okhttp3.tls.HandshakeCertificates;
 import okio.Buffer;
 import okio.BufferedSink;
 import okio.BufferedSource;
@@ -54,7 +54,6 @@ import org.junit.Test;
 
 import static okhttp3.TestUtil.defaultClient;
 import static okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_END;
-import static okhttp3.tls.internal.TlsUtil.localhost;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -73,7 +72,7 @@ public final class CacheTest {
   @Rule public MockWebServer server2 = new MockWebServer();
   @Rule public InMemoryFileSystem fileSystem = new InMemoryFileSystem();
 
-  private final HandshakeCertificates handshakeCertificates = localhost();
+  private final SslClient sslClient = SslClient.localhost();
   private OkHttpClient client;
   private Cache cache;
   private final CookieManager cookieManager = new CookieManager();
@@ -254,15 +253,14 @@ public final class CacheTest {
   }
 
   @Test public void secureResponseCaching() throws IOException {
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    server.useHttps(sslClient.socketFactory, false);
     server.enqueue(new MockResponse()
         .addHeader("Last-Modified: " + formatDate(-1, TimeUnit.HOURS))
         .addHeader("Expires: " + formatDate(1, TimeUnit.HOURS))
         .setBody("ABC"));
 
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(NULL_HOSTNAME_VERIFIER)
         .build();
 
@@ -351,7 +349,7 @@ public final class CacheTest {
   }
 
   @Test public void secureResponseCachingAndRedirects() throws IOException {
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    server.useHttps(sslClient.socketFactory, false);
     server.enqueue(new MockResponse()
         .addHeader("Last-Modified: " + formatDate(-1, TimeUnit.HOURS))
         .addHeader("Expires: " + formatDate(1, TimeUnit.HOURS))
@@ -365,8 +363,7 @@ public final class CacheTest {
         .setBody("DEF"));
 
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(NULL_HOSTNAME_VERIFIER)
         .build();
 
@@ -392,7 +389,7 @@ public final class CacheTest {
    * https://github.com/square/okhttp/issues/214
    */
   @Test public void secureResponseCachingAndProtocolRedirects() throws IOException {
-    server2.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    server2.useHttps(sslClient.socketFactory, false);
     server2.enqueue(new MockResponse()
         .addHeader("Last-Modified: " + formatDate(-1, TimeUnit.HOURS))
         .addHeader("Expires: " + formatDate(1, TimeUnit.HOURS))
@@ -407,8 +404,7 @@ public final class CacheTest {
         .addHeader("Location: " + server2.url("/")));
 
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(NULL_HOSTNAME_VERIFIER)
         .build();
 
@@ -778,7 +774,7 @@ public final class CacheTest {
 
   private RequestBody requestBodyOrNull(String requestMethod) {
     return (requestMethod.equals("POST") || requestMethod.equals("PUT"))
-        ? RequestBody.create(MediaType.get("text/plain"), "foo")
+        ? RequestBody.create(MediaType.parse("text/plain"), "foo")
         : null;
   }
 
@@ -866,7 +862,7 @@ public final class CacheTest {
 
     Request request = new Request.Builder()
         .url(url)
-        .put(RequestBody.create(MediaType.get("text/plain"), "foo"))
+        .put(RequestBody.create(MediaType.parse("text/plain"), "foo"))
         .build();
     Response invalidate = client.newCall(request).execute();
     assertEquals("", invalidate.body().string());
@@ -1382,7 +1378,7 @@ public final class CacheTest {
     Date lastModifiedDate = new Date(System.currentTimeMillis() + TimeUnit.HOURS.toMillis(-1));
     Date servedDate = new Date(System.currentTimeMillis() + TimeUnit.HOURS.toMillis(-2));
     DateFormat dateFormat = new SimpleDateFormat("EEE dd-MMM-yyyy HH:mm:ss z", Locale.US);
-    dateFormat.setTimeZone(TimeZone.getTimeZone("America/New_York"));
+    dateFormat.setTimeZone(TimeZone.getTimeZone("EDT"));
     String lastModifiedString = dateFormat.format(lastModifiedDate);
     String servedString = dateFormat.format(servedDate);
 
@@ -1760,7 +1756,7 @@ public final class CacheTest {
   }
 
   @Test public void varyAndHttps() throws Exception {
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    server.useHttps(sslClient.socketFactory, false);
     server.enqueue(new MockResponse()
         .addHeader("Cache-Control: max-age=60")
         .addHeader("Vary: Accept-Language")
@@ -1769,8 +1765,7 @@ public final class CacheTest {
         .setBody("B"));
 
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(NULL_HOSTNAME_VERIFIER)
         .build();
 

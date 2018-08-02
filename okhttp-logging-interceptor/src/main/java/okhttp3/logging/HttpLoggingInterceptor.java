@@ -32,7 +32,6 @@ import okhttp3.internal.http.HttpHeaders;
 import okhttp3.internal.platform.Platform;
 import okio.Buffer;
 import okio.BufferedSource;
-import okio.GzipSource;
 
 import static okhttp3.internal.platform.Platform.INFO;
 
@@ -183,7 +182,7 @@ public final class HttpLoggingInterceptor implements Interceptor {
 
       if (!logBody || !hasRequestBody) {
         logger.log("--> END " + request.method());
-      } else if (bodyHasUnknownEncoding(request.headers())) {
+      } else if (bodyEncoded(request.headers())) {
         logger.log("--> END " + request.method() + " (encoded body omitted)");
       } else {
         Buffer buffer = new Buffer();
@@ -234,27 +233,12 @@ public final class HttpLoggingInterceptor implements Interceptor {
 
       if (!logBody || !HttpHeaders.hasBody(response)) {
         logger.log("<-- END HTTP");
-      } else if (bodyHasUnknownEncoding(response.headers())) {
+      } else if (bodyEncoded(response.headers())) {
         logger.log("<-- END HTTP (encoded body omitted)");
       } else {
         BufferedSource source = responseBody.source();
         source.request(Long.MAX_VALUE); // Buffer the entire body.
         Buffer buffer = source.buffer();
-
-        Long gzippedLength = null;
-        if ("gzip".equalsIgnoreCase(headers.get("Content-Encoding"))) {
-          gzippedLength = buffer.size();
-          GzipSource gzippedResponseBody = null;
-          try {
-            gzippedResponseBody = new GzipSource(buffer.clone());
-            buffer = new Buffer();
-            buffer.writeAll(gzippedResponseBody);
-          } finally {
-            if (gzippedResponseBody != null) {
-              gzippedResponseBody.close();
-            }
-          }
-        }
 
         Charset charset = UTF8;
         MediaType contentType = responseBody.contentType();
@@ -273,12 +257,7 @@ public final class HttpLoggingInterceptor implements Interceptor {
           logger.log(buffer.clone().readString(charset));
         }
 
-        if (gzippedLength != null) {
-            logger.log("<-- END HTTP (" + buffer.size() + "-byte, "
-                + gzippedLength + "-gzipped-byte body)");
-        } else {
-            logger.log("<-- END HTTP (" + buffer.size() + "-byte body)");
-        }
+        logger.log("<-- END HTTP (" + buffer.size() + "-byte body)");
       }
     }
 
@@ -309,10 +288,8 @@ public final class HttpLoggingInterceptor implements Interceptor {
     }
   }
 
-  private boolean bodyHasUnknownEncoding(Headers headers) {
+  private boolean bodyEncoded(Headers headers) {
     String contentEncoding = headers.get("Content-Encoding");
-    return contentEncoding != null
-        && !contentEncoding.equalsIgnoreCase("identity")
-        && !contentEncoding.equalsIgnoreCase("gzip");
+    return contentEncoding != null && !contentEncoding.equalsIgnoreCase("identity");
   }
 }

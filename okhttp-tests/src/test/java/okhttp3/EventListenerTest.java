@@ -43,11 +43,10 @@ import okhttp3.RecordingEventListener.SecureConnectStart;
 import okhttp3.internal.DoubleInetAddressDns;
 import okhttp3.internal.RecordingOkAuthenticator;
 import okhttp3.internal.SingleInetAddressDns;
-import okhttp3.logging.HttpLoggingInterceptor;
+import okhttp3.internal.tls.SslClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.SocketPolicy;
-import okhttp3.tls.HandshakeCertificates;
 import okio.Buffer;
 import okio.BufferedSink;
 import org.hamcrest.BaseMatcher;
@@ -62,7 +61,6 @@ import org.junit.Test;
 
 import static java.util.Arrays.asList;
 import static okhttp3.TestUtil.defaultClient;
-import static okhttp3.tls.internal.TlsUtil.localhost;
 import static org.hamcrest.CoreMatchers.any;
 import static org.hamcrest.CoreMatchers.either;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -82,12 +80,12 @@ public final class EventListenerTest {
 
   private final SingleInetAddressDns singleDns = new SingleInetAddressDns();
   private final RecordingEventListener listener = new RecordingEventListener();
-  private final HandshakeCertificates handshakeCertificates = localhost();
+  private final SslClient sslClient = SslClient.localhost();
 
   private OkHttpClient client;
   private SocksProxy socksProxy;
 
-  @Before public void setUp() {
+  @Before public void setUp() throws IOException {
     client = defaultClient().newBuilder()
         .dns(singleDns)
         .eventListener(listener)
@@ -136,7 +134,7 @@ public final class EventListenerTest {
         completionLatch.countDown();
       }
 
-      @Override public void onResponse(Call call, Response response) {
+      @Override public void onResponse(Call call, Response response) throws IOException {
         response.close();
         completionLatch.countDown();
       }
@@ -153,8 +151,8 @@ public final class EventListenerTest {
     assertEquals(expectedEvents, listener.recordedEventTypes());
   }
 
-  @Test public void failedCallEventSequence() {
-    server.enqueue(new MockResponse().setHeadersDelay(2, TimeUnit.SECONDS));
+  @Test public void failedCallEventSequence() throws IOException {
+    server.enqueue(new MockResponse().setBodyDelay(2, TimeUnit.SECONDS));
 
     client = client.newBuilder().readTimeout(250, TimeUnit.MILLISECONDS).build();
 
@@ -174,38 +172,7 @@ public final class EventListenerTest {
     assertEquals(expectedEvents, listener.recordedEventTypes());
   }
 
-  @Test public void failedDribbledCallEventSequence() throws IOException {
-    server.enqueue(new MockResponse().setBody("0123456789")
-        .throttleBody(2, 100, TimeUnit.MILLISECONDS)
-        .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY));
-
-    client = client.newBuilder()
-        .protocols(Collections.singletonList(Protocol.HTTP_1_1))
-        .readTimeout(250, TimeUnit.MILLISECONDS)
-        .build();
-
-    Call call = client.newCall(new Request.Builder()
-        .url(server.url("/"))
-        .build());
-
-    Response response = call.execute();
-    try {
-      response.body.string();
-      fail();
-    } catch (IOException expected) {
-      assertThat(expected.getMessage(), equalTo("unexpected end of stream"));
-    }
-
-    List<String> expectedEvents = Arrays.asList("CallStart", "DnsStart", "DnsEnd",
-        "ConnectStart", "ConnectEnd", "ConnectionAcquired", "RequestHeadersStart",
-        "RequestHeadersEnd", "ResponseHeadersStart", "ResponseHeadersEnd", "ResponseBodyStart",
-        "ResponseBodyEnd", "ConnectionReleased", "CallFailed");
-    assertEquals(expectedEvents, listener.recordedEventTypes());
-    ResponseBodyEnd bodyEnd = listener.removeUpToEvent(ResponseBodyEnd.class);
-    assertEquals(5, bodyEnd.bytesRead);
-  }
-
-  @Test public void canceledCallEventSequence() {
+  @Test public void canceledCallEventSequence() throws IOException {
     Call call = client.newCall(new Request.Builder()
         .url(server.url("/"))
         .build());
@@ -479,7 +446,7 @@ public final class EventListenerTest {
 
   @Test public void emptyDnsLookup() {
     Dns emptyDns = new Dns() {
-      @Override public List<InetAddress> lookup(String hostname) {
+      @Override public List<InetAddress> lookup(String hostname) throws UnknownHostException {
         return Collections.emptyList();
       }
     };
@@ -967,14 +934,14 @@ public final class EventListenerTest {
     requestBodyFail();
   }
 
-  private void requestBodyFail() {
+  private void requestBodyFail() throws IOException {
     // Stream a 8 MiB body so the disconnect will happen before the server has read everything.
     RequestBody requestBody = new RequestBody() {
       @Override public MediaType contentType() {
-        return MediaType.get("text/plain");
+        return MediaType.parse("text/plain");
       }
 
-      @Override public long contentLength() {
+      @Override public long contentLength() throws IOException {
         return 1024 * 8192;
       }
 
@@ -1006,26 +973,26 @@ public final class EventListenerTest {
   @Test public void requestBodySuccessHttp1OverHttps() throws IOException {
     enableTlsWithTunnel(false);
     server.setProtocols(Arrays.asList(Protocol.HTTP_1_1));
-    requestBodySuccess(RequestBody.create(MediaType.get("text/plain"), "Hello"), equalTo(5L),
+    requestBodySuccess(RequestBody.create(MediaType.parse("text/plain"), "Hello"), equalTo(5L),
         equalTo(19L));
   }
 
   @Test public void requestBodySuccessHttp2OverHttps() throws IOException {
     enableTlsWithTunnel(false);
     server.setProtocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1));
-    requestBodySuccess(RequestBody.create(MediaType.get("text/plain"), "Hello"), equalTo(5L),
+    requestBodySuccess(RequestBody.create(MediaType.parse("text/plain"), "Hello"), equalTo(5L),
         equalTo(19L));
   }
 
   @Test public void requestBodySuccessHttp() throws IOException {
-    requestBodySuccess(RequestBody.create(MediaType.get("text/plain"), "Hello"), equalTo(5L),
+    requestBodySuccess(RequestBody.create(MediaType.parse("text/plain"), "Hello"), equalTo(5L),
         equalTo(19L));
   }
 
   @Test public void requestBodySuccessStreaming() throws IOException {
     RequestBody requestBody = new RequestBody() {
       @Override public MediaType contentType() {
-        return MediaType.get("text/plain");
+        return MediaType.parse("text/plain");
       }
 
       @Override public void writeTo(BufferedSink sink) throws IOException {
@@ -1038,29 +1005,8 @@ public final class EventListenerTest {
   }
 
   @Test public void requestBodySuccessEmpty() throws IOException {
-    requestBodySuccess(RequestBody.create(MediaType.get("text/plain"), ""), equalTo(0L),
+    requestBodySuccess(RequestBody.create(MediaType.parse("text/plain"), ""), equalTo(0L),
         equalTo(19L));
-  }
-
-  @Test public void successfulCallEventSequenceWithListener() throws IOException {
-    server.enqueue(new MockResponse().setBody("abc"));
-
-    client = client.newBuilder().addNetworkInterceptor(new HttpLoggingInterceptor().setLevel(
-        HttpLoggingInterceptor.Level.BODY)).build();
-
-    Call call = client.newCall(new Request.Builder()
-        .url(server.url("/"))
-        .build());
-    Response response = call.execute();
-    assertEquals(200, response.code());
-    assertEquals("abc", response.body().string());
-    response.body().close();
-
-    List<String> expectedEvents = Arrays.asList("CallStart", "DnsStart", "DnsEnd",
-        "ConnectStart", "ConnectEnd", "ConnectionAcquired", "RequestHeadersStart",
-        "RequestHeadersEnd", "ResponseHeadersStart", "ResponseHeadersEnd", "ResponseBodyStart",
-        "ResponseBodyEnd", "ConnectionReleased", "CallEnd");
-    assertEquals(expectedEvents, listener.recordedEventTypes());
   }
 
   private void requestBodySuccess(RequestBody body, Matcher<Long> requestBodyBytes,
@@ -1080,10 +1026,9 @@ public final class EventListenerTest {
 
   private void enableTlsWithTunnel(boolean tunnelProxy) {
     client = client.newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(new RecordingHostnameVerifier())
         .build();
-    server.useHttps(handshakeCertificates.sslSocketFactory(), tunnelProxy);
+    server.useHttps(sslClient.socketFactory, tunnelProxy);
   }
 }

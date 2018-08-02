@@ -21,19 +21,17 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.UUID;
 import okhttp3.internal.Util;
 import okio.Buffer;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 
 public final class RequestTest {
   @Test public void string() throws Exception {
-    MediaType contentType = MediaType.get("text/plain; charset=utf-8");
+    MediaType contentType = MediaType.parse("text/plain; charset=utf-8");
     RequestBody body = RequestBody.create(contentType, "abc".getBytes(Util.UTF_8));
     assertEquals(contentType, body.contentType());
     assertEquals(3, body.contentLength());
@@ -42,15 +40,15 @@ public final class RequestTest {
   }
 
   @Test public void stringWithDefaultCharsetAdded() throws Exception {
-    MediaType contentType = MediaType.get("text/plain");
+    MediaType contentType = MediaType.parse("text/plain");
     RequestBody body = RequestBody.create(contentType, "\u0800");
-    assertEquals(MediaType.get("text/plain; charset=utf-8"), body.contentType());
+    assertEquals(MediaType.parse("text/plain; charset=utf-8"), body.contentType());
     assertEquals(3, body.contentLength());
     assertEquals("e0a080", bodyToHex(body));
   }
 
   @Test public void stringWithNonDefaultCharsetSpecified() throws Exception {
-    MediaType contentType = MediaType.get("text/plain; charset=utf-16be");
+    MediaType contentType = MediaType.parse("text/plain; charset=utf-16be");
     RequestBody body = RequestBody.create(contentType, "\u0800");
     assertEquals(contentType, body.contentType());
     assertEquals(2, body.contentLength());
@@ -58,7 +56,7 @@ public final class RequestTest {
   }
 
   @Test public void byteArray() throws Exception {
-    MediaType contentType = MediaType.get("text/plain");
+    MediaType contentType = MediaType.parse("text/plain");
     RequestBody body = RequestBody.create(contentType, "abc".getBytes(Util.UTF_8));
     assertEquals(contentType, body.contentType());
     assertEquals(3, body.contentLength());
@@ -67,7 +65,7 @@ public final class RequestTest {
   }
 
   @Test public void byteArrayRange() throws Exception {
-    MediaType contentType = MediaType.get("text/plain");
+    MediaType contentType = MediaType.parse("text/plain");
     RequestBody body = RequestBody.create(contentType, ".abcd".getBytes(Util.UTF_8), 1, 3);
     assertEquals(contentType, body.contentType());
     assertEquals(3, body.contentLength());
@@ -81,7 +79,7 @@ public final class RequestTest {
     writer.write("abc");
     writer.close();
 
-    MediaType contentType = MediaType.get("text/plain");
+    MediaType contentType = MediaType.parse("text/plain");
     RequestBody body = RequestBody.create(contentType, file);
     assertEquals(contentType, body.contentType());
     assertEquals(3, body.contentLength());
@@ -91,7 +89,7 @@ public final class RequestTest {
 
   /** Common verbs used for apis such as GitHub, AWS, and Google Cloud. */
   @Test public void crudVerbs() throws IOException {
-    MediaType contentType = MediaType.get("application/json");
+    MediaType contentType = MediaType.parse("application/json");
     RequestBody body = RequestBody.create(contentType, "{}");
 
     Request get = new Request.Builder().url("http://localhost/api").get().build();
@@ -122,24 +120,24 @@ public final class RequestTest {
   @Test public void uninitializedURI() throws Exception {
     Request request = new Request.Builder().url("http://localhost/api").build();
     assertEquals(new URI("http://localhost/api"), request.url().uri());
-    assertEquals(HttpUrl.get("http://localhost/api"), request.url());
+    assertEquals(HttpUrl.parse("http://localhost/api"), request.url());
   }
 
-  @Test public void newBuilderUrlResetsUrl() {
+  @Test public void newBuilderUrlResetsUrl() throws Exception {
     Request requestWithoutCache = new Request.Builder().url("http://localhost/api").build();
     Request builtRequestWithoutCache =
         requestWithoutCache.newBuilder().url("http://localhost/api/foo").build();
-    assertEquals(HttpUrl.get("http://localhost/api/foo"), builtRequestWithoutCache.url());
+    assertEquals(HttpUrl.parse("http://localhost/api/foo"), builtRequestWithoutCache.url());
 
     Request requestWithCache = new Request.Builder().url("http://localhost/api").build();
     // cache url object
     requestWithCache.url();
     Request builtRequestWithCache = requestWithCache.newBuilder().url(
         "http://localhost/api/foo").build();
-    assertEquals(HttpUrl.get("http://localhost/api/foo"), builtRequestWithCache.url());
+    assertEquals(HttpUrl.parse("http://localhost/api/foo"), builtRequestWithCache.url());
   }
 
-  @Test public void cacheControl() {
+  @Test public void cacheControl() throws Exception {
     Request request = new Request.Builder()
         .cacheControl(new CacheControl.Builder().noCache().build())
         .url("https://square.com")
@@ -147,7 +145,7 @@ public final class RequestTest {
     assertEquals(Arrays.asList("no-cache"), request.headers("Cache-Control"));
   }
 
-  @Test public void emptyCacheControlClearsAllCacheControlHeaders() {
+  @Test public void emptyCacheControlClearsAllCacheControlHeaders() throws Exception {
     Request request = new Request.Builder()
         .header("Cache-Control", "foo")
         .cacheControl(new CacheControl.Builder().build())
@@ -156,13 +154,13 @@ public final class RequestTest {
     assertEquals(Collections.<String>emptyList(), request.headers("Cache-Control"));
   }
 
-  @Test public void headerAcceptsPermittedCharacters() {
+  @Test public void headerAcceptsPermittedCharacters() throws Exception {
     Request.Builder builder = new Request.Builder();
     builder.header("AZab09~", "AZab09 ~");
     builder.addHeader("AZab09~", "AZab09 ~");
   }
 
-  @Test public void emptyNameForbidden() {
+  @Test public void emptyNameForbidden() throws Exception {
     Request.Builder builder = new Request.Builder();
     try {
       builder.header("", "Value");
@@ -176,7 +174,7 @@ public final class RequestTest {
     }
   }
 
-  @Test public void headerForbidsNullArguments() {
+  @Test public void headerForbidsNullArguments() throws Exception {
     Request.Builder builder = new Request.Builder();
     try {
       builder.header(null, "Value");
@@ -200,7 +198,7 @@ public final class RequestTest {
     }
   }
 
-  @Test public void headerAllowsTabOnlyInValues() {
+  @Test public void headerAllowsTabOnlyInValues() throws Exception {
     Request.Builder builder = new Request.Builder();
     builder.header("key", "sample\tvalue");
     try {
@@ -210,7 +208,7 @@ public final class RequestTest {
     }
   }
 
-  @Test public void headerForbidsControlCharacters() {
+  @Test public void headerForbidsControlCharacters() throws Exception {
     assertForbiddenHeader("\u0000");
     assertForbiddenHeader("\r");
     assertForbiddenHeader("\n");
@@ -242,111 +240,6 @@ public final class RequestTest {
       fail();
     } catch (IllegalArgumentException expected) {
     }
-  }
-
-  @Test public void noTag() {
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .build();
-    assertNull(request.tag());
-    assertNull(request.tag(Object.class));
-    assertNull(request.tag(UUID.class));
-    assertNull(request.tag(String.class));
-  }
-
-  @Test public void defaultTag() {
-    UUID tag = UUID.randomUUID();
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(tag)
-        .build();
-    assertSame(tag, request.tag());
-    assertSame(tag, request.tag(Object.class));
-    assertNull(request.tag(UUID.class));
-    assertNull(request.tag(String.class));
-  }
-
-  @Test public void nullRemovesTag() {
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag("a")
-        .tag(null)
-        .build();
-    assertNull(request.tag());
-  }
-
-  @Test public void removeAbsentTag() {
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(null)
-        .build();
-    assertNull(request.tag());
-  }
-
-  @Test public void objectTag() {
-    UUID tag = UUID.randomUUID();
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(Object.class, tag)
-        .build();
-    assertSame(tag, request.tag());
-    assertSame(tag, request.tag(Object.class));
-    assertNull(request.tag(UUID.class));
-    assertNull(request.tag(String.class));
-  }
-
-  @Test public void typedTag() {
-    UUID uuidTag = UUID.randomUUID();
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(UUID.class, uuidTag)
-        .build();
-    assertNull(request.tag());
-    assertNull(request.tag(Object.class));
-    assertSame(uuidTag, request.tag(UUID.class));
-    assertNull(request.tag(String.class));
-  }
-
-  @Test public void replaceOnlyTag() {
-    UUID uuidTag1 = UUID.randomUUID();
-    UUID uuidTag2 = UUID.randomUUID();
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(UUID.class, uuidTag1)
-        .tag(UUID.class, uuidTag2)
-        .build();
-    assertSame(uuidTag2, request.tag(UUID.class));
-  }
-
-  @Test public void multipleTags() {
-    UUID uuidTag = UUID.randomUUID();
-    String stringTag = "dilophosaurus";
-    Long longTag = 20170815L;
-    Object objectTag = new Object();
-    Request request = new Request.Builder()
-        .url("https://square.com")
-        .tag(Object.class, objectTag)
-        .tag(UUID.class, uuidTag)
-        .tag(String.class, stringTag)
-        .tag(Long.class, longTag)
-        .build();
-    assertSame(objectTag, request.tag());
-    assertSame(objectTag, request.tag(Object.class));
-    assertSame(uuidTag, request.tag(UUID.class));
-    assertSame(stringTag, request.tag(String.class));
-    assertSame(longTag, request.tag(Long.class));
-  }
-
-  /** Confirm that we don't accidentally share the backing map between objects. */
-  @Test public void tagsAreImmutable() {
-    Request.Builder builder = new Request.Builder()
-        .url("https://square.com");
-    Request requestA = builder.tag(String.class, "a").build();
-    Request requestB = builder.tag(String.class, "b").build();
-    Request requestC = requestA.newBuilder().tag(String.class, "c").build();
-    assertSame("a", requestA.tag(String.class));
-    assertSame("b", requestB.tag(String.class));
-    assertSame("c", requestC.tag(String.class));
   }
 
   private String bodyToHex(RequestBody body) throws IOException {

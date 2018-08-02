@@ -115,7 +115,7 @@ public final class Response implements Closeable {
    * Returns the TLS handshake of the connection that carried this response, or null if the response
    * was received without TLS.
    */
-  public @Nullable Handshake handshake() {
+  public Handshake handshake() {
     return handshake;
   }
 

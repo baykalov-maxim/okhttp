@@ -107,12 +107,11 @@ public final class StreamAllocation {
     int connectTimeout = chain.connectTimeoutMillis();
     int readTimeout = chain.readTimeoutMillis();
     int writeTimeout = chain.writeTimeoutMillis();
-    int pingIntervalMillis = client.pingIntervalMillis();
     boolean connectionRetryEnabled = client.retryOnConnectionFailure();
 
     try {
       RealConnection resultConnection = findHealthyConnection(connectTimeout, readTimeout,
-          writeTimeout, pingIntervalMillis, connectionRetryEnabled, doExtensiveHealthChecks);
+          writeTimeout, connectionRetryEnabled, doExtensiveHealthChecks);
       HttpCodec resultCodec = resultConnection.newCodec(client, chain, this);
 
       synchronized (connectionPool) {
@@ -129,11 +128,11 @@ public final class StreamAllocation {
    * until a healthy connection is found.
    */
   private RealConnection findHealthyConnection(int connectTimeout, int readTimeout,
-      int writeTimeout, int pingIntervalMillis, boolean connectionRetryEnabled,
-      boolean doExtensiveHealthChecks) throws IOException {
+      int writeTimeout, boolean connectionRetryEnabled, boolean doExtensiveHealthChecks)
+      throws IOException {
     while (true) {
       RealConnection candidate = findConnection(connectTimeout, readTimeout, writeTimeout,
-          pingIntervalMillis, connectionRetryEnabled);
+          connectionRetryEnabled);
 
       // If this is a brand new connection, we can skip the extensive health checks.
       synchronized (connectionPool) {
@@ -158,7 +157,7 @@ public final class StreamAllocation {
    * then the pool, finally building a new connection.
    */
   private RealConnection findConnection(int connectTimeout, int readTimeout, int writeTimeout,
-      int pingIntervalMillis, boolean connectionRetryEnabled) throws IOException {
+      boolean connectionRetryEnabled) throws IOException {
     boolean foundPooledConnection = false;
     RealConnection result = null;
     Route selectedRoute = null;
@@ -254,8 +253,8 @@ public final class StreamAllocation {
     }
 
     // Do TCP + TLS handshakes. This is a blocking operation.
-    result.connect(connectTimeout, readTimeout, writeTimeout, pingIntervalMillis,
-        connectionRetryEnabled, call, eventListener);
+    result.connect(
+        connectTimeout, readTimeout, writeTimeout, connectionRetryEnabled, call, eventListener);
     routeDatabase().connected(result.route());
 
     Socket socket = null;
@@ -333,10 +332,6 @@ public final class StreamAllocation {
     return Internal.instance.routeDatabase(connectionPool);
   }
 
-  public Route route() {
-    return route;
-  }
-
   public synchronized RealConnection connection() {
     return connection;
   }
@@ -352,7 +347,6 @@ public final class StreamAllocation {
     closeQuietly(socket);
     if (releasedConnection != null) {
       eventListener.connectionReleased(call, releasedConnection);
-      eventListener.callEnd(call);
     }
   }
 
@@ -428,16 +422,13 @@ public final class StreamAllocation {
 
     synchronized (connectionPool) {
       if (e instanceof StreamResetException) {
-        ErrorCode errorCode = ((StreamResetException) e).errorCode;
-        if (errorCode == ErrorCode.REFUSED_STREAM) {
-          // Retry REFUSED_STREAM errors once on the same connection.
+        StreamResetException streamResetException = (StreamResetException) e;
+        if (streamResetException.errorCode == ErrorCode.REFUSED_STREAM) {
           refusedStreamCount++;
-          if (refusedStreamCount > 1) {
-            noNewStreams = true;
-            route = null;
-          }
-        } else if (errorCode != ErrorCode.CANCEL) {
-          // Keep the connection for CANCEL errors. Everything else wants a fresh connection.
+        }
+        // On HTTP/2 stream errors, retry REFUSED_STREAM errors once on the same connection. All
+        // other errors must be retried on a new connection.
+        if (streamResetException.errorCode != ErrorCode.REFUSED_STREAM || refusedStreamCount > 1) {
           noNewStreams = true;
           route = null;
         }

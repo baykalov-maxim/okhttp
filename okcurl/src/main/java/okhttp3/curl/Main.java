@@ -47,7 +47,6 @@ import okhttp3.Response;
 import okhttp3.internal.Util;
 import okhttp3.internal.http.StatusLine;
 import okhttp3.internal.http2.Http2;
-import okhttp3.internal.platform.Platform;
 import okio.BufferedSource;
 import okio.Okio;
 import okio.Sink;
@@ -258,7 +257,7 @@ public class Main extends HelpOption implements Runnable {
 
   private static SSLSocketFactory createInsecureSslSocketFactory(TrustManager trustManager) {
     try {
-      SSLContext context = Platform.get().getSSLContext();
+      SSLContext context = SSLContext.getInstance("TLS");
       context.init(null, new TrustManager[] {trustManager}, null);
       return context.getSocketFactory();
     } catch (Exception e) {

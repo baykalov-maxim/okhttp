@@ -15,37 +15,22 @@
  */
 package okhttp3.internal.tls;
 
-import java.security.GeneralSecurityException;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
-import java.util.Collections;
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLPeerUnverifiedException;
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509KeyManager;
-import javax.net.ssl.X509TrustManager;
 import okhttp3.Call;
 import okhttp3.CertificatePinner;
 import okhttp3.OkHttpClient;
 import okhttp3.RecordingHostnameVerifier;
 import okhttp3.Request;
 import okhttp3.Response;
-import okhttp3.internal.platform.Platform;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.SocketPolicy;
-import okhttp3.tls.HeldCertificate;
-import okhttp3.tls.HandshakeCertificates;
 import org.junit.Rule;
 import org.junit.Test;
 
 import static okhttp3.TestUtil.defaultClient;
 import static okhttp3.internal.platform.PlatformTest.getPlatform;
-import static okhttp3.tls.internal.TlsUtil.newKeyManager;
-import static okhttp3.tls.internal.TlsUtil.newTrustManager;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -56,38 +41,37 @@ public final class CertificatePinnerChainValidationTest {
   /** The pinner should pull the root certificate from the trust manager. */
   @Test public void pinRootNotPresentInChain() throws Exception {
     HeldCertificate rootCa = new HeldCertificate.Builder()
-        .serialNumber(1L)
-        .certificateAuthority(1)
+        .serialNumber("1")
+        .ca(3)
         .commonName("root")
         .build();
     HeldCertificate intermediateCa = new HeldCertificate.Builder()
-        .signedBy(rootCa)
-        .certificateAuthority(0)
-        .serialNumber(2L)
+        .issuedBy(rootCa)
+        .ca(2)
+        .serialNumber("2")
         .commonName("intermediate_ca")
         .build();
     HeldCertificate certificate = new HeldCertificate.Builder()
-        .signedBy(intermediateCa)
-        .serialNumber(3L)
+        .issuedBy(intermediateCa)
+        .serialNumber("3")
         .commonName(server.getHostName())
         .build();
     CertificatePinner certificatePinner = new CertificatePinner.Builder()
-        .add(server.getHostName(), CertificatePinner.pin(rootCa.certificate()))
+        .add(server.getHostName(), CertificatePinner.pin(rootCa.certificate))
         .build();
-    HandshakeCertificates handshakeCertificates = new HandshakeCertificates.Builder()
-        .addTrustedCertificate(rootCa.certificate())
+    SslClient sslClient = new SslClient.Builder()
+        .addTrustedCertificate(rootCa.certificate)
         .build();
     OkHttpClient client = defaultClient().newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
         .hostnameVerifier(new RecordingHostnameVerifier())
         .certificatePinner(certificatePinner)
         .build();
 
-    HandshakeCertificates serverHandshakeCertificates = new HandshakeCertificates.Builder()
-        .heldCertificate(certificate, intermediateCa.certificate())
+    SslClient serverSslClient = new SslClient.Builder()
+        .certificateChain(certificate, intermediateCa)
         .build();
-    server.useHttps(serverHandshakeCertificates.sslSocketFactory(), false);
+    server.useHttps(serverSslClient.socketFactory, false);
 
     // The request should complete successfully.
     server.enqueue(new MockResponse()
@@ -113,38 +97,37 @@ public final class CertificatePinnerChainValidationTest {
   /** The pinner should accept an intermediate from the server's chain. */
   @Test public void pinIntermediatePresentInChain() throws Exception {
     HeldCertificate rootCa = new HeldCertificate.Builder()
-        .serialNumber(1L)
-        .certificateAuthority(1)
+        .serialNumber("1")
+        .ca(3)
         .commonName("root")
         .build();
     HeldCertificate intermediateCa = new HeldCertificate.Builder()
-        .signedBy(rootCa)
-        .certificateAuthority(0)
-        .serialNumber(2L)
+        .issuedBy(rootCa)
+        .ca(2)
+        .serialNumber("2")
         .commonName("intermediate_ca")
         .build();
     HeldCertificate certificate = new HeldCertificate.Builder()
-        .signedBy(intermediateCa)
-        .serialNumber(3L)
+        .issuedBy(intermediateCa)
+        .serialNumber("3")
         .commonName(server.getHostName())
         .build();
     CertificatePinner certificatePinner = new CertificatePinner.Builder()
-        .add(server.getHostName(), CertificatePinner.pin(intermediateCa.certificate()))
+        .add(server.getHostName(), CertificatePinner.pin(intermediateCa.certificate))
         .build();
-    HandshakeCertificates handshakeCertificates = new HandshakeCertificates.Builder()
-        .addTrustedCertificate(rootCa.certificate())
+    SslClient contextBuilder = new SslClient.Builder()
+        .addTrustedCertificate(rootCa.certificate)
         .build();
     OkHttpClient client = defaultClient().newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(contextBuilder.socketFactory, contextBuilder.trustManager)
         .hostnameVerifier(new RecordingHostnameVerifier())
         .certificatePinner(certificatePinner)
         .build();
 
-    HandshakeCertificates serverHandshakeCertificates = new HandshakeCertificates.Builder()
-        .heldCertificate(certificate, intermediateCa.certificate())
+    SslClient serverSslContext = new SslClient.Builder()
+        .certificateChain(certificate.keyPair, certificate.certificate, intermediateCa.certificate)
         .build();
-    server.useHttps(serverHandshakeCertificates.sslSocketFactory(), false);
+    server.useHttps(serverSslContext.socketFactory, false);
 
     // The request should complete successfully.
     server.enqueue(new MockResponse()
@@ -175,8 +158,8 @@ public final class CertificatePinnerChainValidationTest {
   @Test public void unrelatedPinnedLeafCertificateInChain() throws Exception {
     // Start with a trusted root CA certificate.
     HeldCertificate rootCa = new HeldCertificate.Builder()
-        .serialNumber(1L)
-        .certificateAuthority(1)
+        .serialNumber("1")
+        .ca(3)
         .commonName("root")
         .build();
 
@@ -184,25 +167,24 @@ public final class CertificatePinnerChainValidationTest {
     // SSL context for an HTTP client under attack. It includes the trusted CA and a pinned
     // certificate.
     HeldCertificate goodIntermediateCa = new HeldCertificate.Builder()
-        .signedBy(rootCa)
-        .certificateAuthority(0)
-        .serialNumber(2L)
+        .issuedBy(rootCa)
+        .ca(2)
+        .serialNumber("2")
         .commonName("good_intermediate_ca")
         .build();
     HeldCertificate goodCertificate = new HeldCertificate.Builder()
-        .signedBy(goodIntermediateCa)
-        .serialNumber(3L)
+        .issuedBy(goodIntermediateCa)
+        .serialNumber("3")
         .commonName(server.getHostName())
         .build();
     CertificatePinner certificatePinner = new CertificatePinner.Builder()
-        .add(server.getHostName(), CertificatePinner.pin(goodCertificate.certificate()))
+        .add(server.getHostName(), CertificatePinner.pin(goodCertificate.certificate))
         .build();
-    HandshakeCertificates handshakeCertificates = new HandshakeCertificates.Builder()
-        .addTrustedCertificate(rootCa.certificate())
+    SslClient clientContextBuilder = new SslClient.Builder()
+        .addTrustedCertificate(rootCa.certificate)
         .build();
     OkHttpClient client = defaultClient().newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(clientContextBuilder.socketFactory, clientContextBuilder.trustManager)
         .hostnameVerifier(new RecordingHostnameVerifier())
         .certificatePinner(certificatePinner)
         .build();
@@ -212,21 +194,32 @@ public final class CertificatePinnerChainValidationTest {
     // trusted good certificate above. The attack is that by including the good certificate in the
     // chain, we may trick the certificate pinner into accepting the rouge certificate.
     HeldCertificate compromisedIntermediateCa = new HeldCertificate.Builder()
-        .signedBy(rootCa)
-        .certificateAuthority(0)
-        .serialNumber(4L)
+        .issuedBy(rootCa)
+        .ca(2)
+        .serialNumber("4")
         .commonName("bad_intermediate_ca")
         .build();
     HeldCertificate rogueCertificate = new HeldCertificate.Builder()
-        .serialNumber(5L)
-        .signedBy(compromisedIntermediateCa)
+        .serialNumber("5")
+        .issuedBy(compromisedIntermediateCa)
         .commonName(server.getHostName())
         .build();
 
-    SSLSocketFactory socketFactory = newServerSocketFactory(rogueCertificate,
-        compromisedIntermediateCa.certificate(), goodCertificate.certificate());
+    SslClient.Builder sslBuilder = new SslClient.Builder();
 
-    server.useHttps(socketFactory, false);
+    // Test setup fails on JDK9
+    // java.security.KeyStoreException: Certificate chain is not valid
+    // at sun.security.pkcs12.PKCS12KeyStore.setKeyEntry
+    // http://openjdk.java.net/jeps/229
+    // http://hg.openjdk.java.net/jdk9/jdk9/jdk/file/2c1c21d11e58/src/share/classes/sun/security/pkcs12/PKCS12KeyStore.java#l596
+    if (getPlatform().equals("jdk9")) {
+      sslBuilder.keyStoreType("JKS");
+    }
+
+    SslClient serverSslContext = sslBuilder.certificateChain(
+        rogueCertificate.keyPair, rogueCertificate.certificate, compromisedIntermediateCa.certificate, goodCertificate.certificate, rootCa.certificate)
+        .build();
+    server.useHttps(serverSslContext.socketFactory, false);
     server.enqueue(new MockResponse()
         .setBody("abc")
         .addHeader("Content-Type: text/plain"));
@@ -250,13 +243,13 @@ public final class CertificatePinnerChainValidationTest {
   @Test public void unrelatedPinnedIntermediateCertificateInChain() throws Exception {
     // Start with two root CA certificates, one is good and the other is compromised.
     HeldCertificate rootCa = new HeldCertificate.Builder()
-        .serialNumber(1L)
-        .certificateAuthority(1)
+        .serialNumber("1")
+        .ca(3)
         .commonName("root")
         .build();
     HeldCertificate compromisedRootCa = new HeldCertificate.Builder()
-        .serialNumber(2L)
-        .certificateAuthority(1)
+        .serialNumber("2")
+        .ca(3)
         .commonName("compromised_root")
         .build();
 
@@ -264,21 +257,20 @@ public final class CertificatePinnerChainValidationTest {
     // SSL context for an HTTP client under attack. It includes the trusted CA and a pinned
     // certificate.
     HeldCertificate goodIntermediateCa = new HeldCertificate.Builder()
-        .signedBy(rootCa)
-        .certificateAuthority(0)
-        .serialNumber(3L)
+        .issuedBy(rootCa)
+        .ca(2)
+        .serialNumber("3")
         .commonName("intermediate_ca")
         .build();
     CertificatePinner certificatePinner = new CertificatePinner.Builder()
-        .add(server.getHostName(), CertificatePinner.pin(goodIntermediateCa.certificate()))
+        .add(server.getHostName(), CertificatePinner.pin(goodIntermediateCa.certificate))
         .build();
-    HandshakeCertificates handshakeCertificates = new HandshakeCertificates.Builder()
-        .addTrustedCertificate(rootCa.certificate())
-        .addTrustedCertificate(compromisedRootCa.certificate())
+    SslClient clientContextBuilder = new SslClient.Builder()
+        .addTrustedCertificate(rootCa.certificate)
+        .addTrustedCertificate(compromisedRootCa.certificate)
         .build();
     OkHttpClient client = defaultClient().newBuilder()
-        .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager())
+        .sslSocketFactory(clientContextBuilder.socketFactory, clientContextBuilder.trustManager)
         .hostnameVerifier(new RecordingHostnameVerifier())
         .certificatePinner(certificatePinner)
         .build();
@@ -288,20 +280,32 @@ public final class CertificatePinnerChainValidationTest {
     // serves the good CAs certificate in the chain, which means the certificate pinner sees a
     // different set of certificates than the SSL verifier.
     HeldCertificate compromisedIntermediateCa = new HeldCertificate.Builder()
-        .signedBy(compromisedRootCa)
-        .certificateAuthority(0)
-        .serialNumber(4L)
+        .issuedBy(compromisedRootCa)
+        .ca(2)
+        .serialNumber("4")
         .commonName("intermediate_ca")
         .build();
     HeldCertificate rogueCertificate = new HeldCertificate.Builder()
-        .serialNumber(5L)
-        .signedBy(compromisedIntermediateCa)
+        .serialNumber("5")
+        .issuedBy(compromisedIntermediateCa)
         .commonName(server.getHostName())
         .build();
 
-    SSLSocketFactory socketFactory = newServerSocketFactory(rogueCertificate,
-        goodIntermediateCa.certificate(), compromisedIntermediateCa.certificate());
-    server.useHttps(socketFactory, false);
+    SslClient.Builder sslBuilder = new SslClient.Builder();
+
+    // Test setup fails on JDK9
+    // java.security.KeyStoreException: Certificate chain is not valid
+    // at sun.security.pkcs12.PKCS12KeyStore.setKeyEntry
+    // http://openjdk.java.net/jeps/229
+    // http://hg.openjdk.java.net/jdk9/jdk9/jdk/file/2c1c21d11e58/src/share/classes/sun/security/pkcs12/PKCS12KeyStore.java#l596
+    if (getPlatform().equals("jdk9")) {
+      sslBuilder.keyStoreType("JKS");
+    }
+
+    SslClient serverSslContext = sslBuilder.certificateChain(
+            rogueCertificate.keyPair, rogueCertificate.certificate, goodIntermediateCa.certificate, compromisedIntermediateCa.certificate, compromisedRootCa.certificate)
+        .build();
+    server.useHttps(serverSslContext.socketFactory, false);
     server.enqueue(new MockResponse()
         .setBody("abc")
         .addHeader("Content-Type: text/plain"));
@@ -324,22 +328,5 @@ public final class CertificatePinnerChainValidationTest {
       String message = expected.getMessage();
       assertTrue(message, message.startsWith("Certificate pinning failure!"));
     }
-  }
-
-  private SSLSocketFactory newServerSocketFactory(HeldCertificate heldCertificate,
-      X509Certificate... intermediates) throws GeneralSecurityException {
-    // Test setup fails on JDK9
-    // java.security.KeyStoreException: Certificate chain is not valid
-    // at sun.security.pkcs12.PKCS12KeyStore.setKeyEntry
-    // http://openjdk.java.net/jeps/229
-    // http://hg.openjdk.java.net/jdk9/jdk9/jdk/file/2c1c21d11e58/src/share/classes/sun/security/pkcs12/PKCS12KeyStore.java#l596
-    String keystoreType = getPlatform().equals("jdk9") ? "JKS" : null;
-    X509KeyManager x509KeyManager = newKeyManager(keystoreType, heldCertificate, intermediates);
-    X509TrustManager trustManager = newTrustManager(
-        keystoreType, Collections.<X509Certificate>emptyList());
-    SSLContext sslContext = Platform.get().getSSLContext();
-    sslContext.init(new KeyManager[] { x509KeyManager }, new TrustManager[] { trustManager },
-        new SecureRandom());
-    return sslContext.getSocketFactory();
   }
 }
